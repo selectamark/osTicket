@@ -619,7 +619,7 @@ class Mail_mimeDecode extends PEAR
                 break;
 
             case 'quoted-printable':
-                return $this->_quotedPrintableDecode($input);
+                return quoted_printable_decode($input);
                 break;
 
             case 'base64':

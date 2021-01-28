@@ -156,7 +156,7 @@
     update: function(lock) {
       if (typeof lock != 'object' || lock.retry === true) {
         // Non-json response, or retry requested server-side
-        return this.retry(this.renew, this.activeAjax, false, lock);
+        return this.retry(this.renew, this.ajaxActive, false, lock);
       }
       if (!lock.id) {
         // Response did not include a lock id number
@@ -343,29 +343,6 @@ var ticket_onload = function($) {
                 window.location.href = $redirect;
             else
                 $.pjax.reload('#pjax-container');
-        }, $options);
-
-        return false;
-    });
-
-    $(document).off('.inline-edit');
-    $(document).on('click.inline-edit', 'a.inline-edit', function(e) {
-        e.preventDefault();
-        var url = 'ajax.php/'
-        +$(this).attr('href').substr(1)
-        +'?_uid='+new Date().getTime();
-        var $options = $(this).data('dialog');
-        $.dialog(url, [201], function (xhr) {
-            var obj = $.parseJSON(xhr.responseText);
-            if (obj.id && obj.value) {
-                $('#field_'+obj.id).html(obj.value);
-                if (obj.value.includes('Empty'))
-                    $('#field_'+obj.id).addClass('faded');
-                else
-                    $('#field_'+obj.id).removeClass('faded');
-                $('#msg-txt').text(obj.msg);
-                $('div#msg_notice').show();
-            }
         }, $options);
 
         return false;

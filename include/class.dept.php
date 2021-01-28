@@ -541,22 +541,11 @@ implements TemplateVariable, Searchable {
             // Clear any settings using dept to default back to system default
             Topic::objects()
                 ->filter(array('dept_id' => $id))
-                ->delete();
+                ->update(array('dept_id' => 0));
+
             Email::objects()
                 ->filter(array('dept_id' => $id))
-                ->delete();
-
-            foreach(FilterAction::objects()
-                ->filter(array('type' => FA_RouteDepartment::$type)) as $fa
-            ) {
-                $config = $fa->getConfiguration();
-                if ($config && $config['dept_id'] == $id) {
-                    $config['dept_id'] = 0;
-                    // FIXME: Move this code into FilterAction class
-                    $fa->set('configuration', JsonDataEncoder::encode($config));
-                    $fa->save();
-                }
-            }
+                ->update(array('dept_id' => 0));
 
             // Delete extended access entries
             StaffDeptAccess::objects()
@@ -795,8 +784,12 @@ implements TemplateVariable, Searchable {
             $errors['pid'] = __('Department selection is required');
 
         $dept = Dept::lookup($vars['pid']);
-        if($dept && !$dept->isActive())
-          $errors['dept_id'] = sprintf(__('%s selected must be active'), __('Parent Department'));
+        if ($dept) {
+          if (!$dept->isActive())
+            $errors['dept_id'] = sprintf(__('%s selected must be active'), __('Parent Department'));
+          elseif (strpos($dept->getFullPath(), '/'.$this->getId().'/') !== false)
+            $errors['pid'] = sprintf(__('%s cannot contain the current %s'), __('Parent Department'), __('Department'));
+        }
 
         if ($vars['sla_id'] && !SLA::lookup($vars['sla_id']))
             $errors['sla_id'] = __('Invalid SLA');
@@ -845,6 +838,8 @@ implements TemplateVariable, Searchable {
                 }
             }
         }
+        if ($vars['disable_auto_claim'] !== 1)
+            unset($vars['disable_auto_claim']);
 
         $this->pid = $vars['pid'] ?: null;
         $this->ispublic = isset($vars['ispublic']) ? (int) $vars['ispublic'] : 0;
@@ -867,9 +862,9 @@ implements TemplateVariable, Searchable {
 
         $filter_actions = FilterAction::objects()->filter(array('type' => 'dept', 'configuration' => '{"dept_id":'. $this->getId().'}'));
         if ($filter_actions && $vars['status'] == 'active')
-          FilterAction::setFilterFlag($filter_actions, 'dept', false);
+          FilterAction::setFilterFlags($filter_actions, 'Filter::FLAG_INACTIVE_DEPT', false);
         else
-          FilterAction::setFilterFlag($filter_actions, 'dept', true);
+          FilterAction::setFilterFlags($filter_actions, 'Filter::FLAG_INACTIVE_DEPT', true);
 
         switch ($vars['status']) {
           case 'active':

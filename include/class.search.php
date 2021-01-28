@@ -823,6 +823,13 @@ class SavedQueue extends CustomQueue {
         return parent::useStandardColumns();
     }
 
+    function inheritColumns() {
+        if ($this->getSettings() && isset($this->_settings['inherit-columns']))
+            return $this->_settings['inherit-columns'];
+
+        return parent::inheritColumns();
+    }
+
     function getStandardColumns() {
         return parent::getColumns(is_null($this->parent));
     }
@@ -952,21 +959,35 @@ class SavedQueue extends CustomQueue {
                 $Q->constraints[] = $reg;
             }
 
-            $expr = SqlCase::N()->when(new SqlExpr(new Q($Q->constraints)), new SqlField('ticket_id'));
-            $query->aggregate(array(
-                "q{$queue->id}" => SqlAggregate::COUNT($expr, true)
-            ));
+            if ($Q->constraints) {
+                $empty = false;
+                if (count($Q->constraints) > 1) {
+                    foreach ($Q->constraints as $value) {
+                        if (!$value->constraints)
+                            $empty = true;
+                    }
+                }
+            }
 
             // Add extra tables joins  (if any)
             if ($Q->extra && isset($Q->extra['tables'])) {
-               $counts['q'.$queue->getId()] = 500;
+               // skip counting keyword searches. Display them as '-'
+               $counts['q'.$queue->getId()] = '-';
                continue;
-                $contraints = array();
-                if ($Q->constraints)
-                     $constraints = new Q($Q->constraints);
-                foreach ($Q->extra['tables'] as $T)
-                    $query->addExtraJoin(array($T, $constraints, ''));
+               $contraints = array();
+               if ($Q->constraints)
+                    $constraints = new Q($Q->constraints);
+               foreach ($Q->extra['tables'] as $T)
+                   $query->addExtraJoin(array($T, $constraints, ''));
             }
+
+            if ($Q->constraints && !$empty) {
+                $expr = SqlCase::N()->when(new SqlExpr(new Q($Q->constraints)), new SqlField('ticket_id'));
+                $query->aggregate(array(
+                    "q{$queue->id}" => SqlAggregate::COUNT($expr, true)
+                ));
+            } else //display skipped counts as '-'
+                $counts['q'.$queue->getId()] = '-';
         }
 
         try {
@@ -1735,7 +1756,18 @@ class TicketStatusChoiceField extends SelectionField {
     }
 }
 
-class TicketThreadCountField extends NumericField {
+/*
+ * Implemented by annotated fields
+ *
+ */
+
+interface AnnotatedField {
+     // Add the annotation to a QuerySet
+    function annotate($query, $name);
+}
+
+class TicketThreadCountField extends NumericField
+implements AnnotatedField {
 
     function addToQuery($query, $name=false) {
         return TicketThreadCount::addToQuery($query, $name);
@@ -1744,9 +1776,14 @@ class TicketThreadCountField extends NumericField {
     function from_query($row, $name=false) {
          return TicketThreadCount::from_query($row, $name);
     }
+
+    function annotate($query, $name) {
+        return TicketThreadCount::annotate($query, $name);
+    }
 }
 
-class TicketReopenCountField extends NumericField {
+class TicketReopenCountField extends NumericField
+implements AnnotatedField {
 
     function addToQuery($query, $name=false) {
         return TicketReopenCount::addToQuery($query, $name);
@@ -1755,9 +1792,14 @@ class TicketReopenCountField extends NumericField {
     function from_query($row, $name=false) {
          return TicketReopenCount::from_query($row, $name);
     }
+
+    function annotate($query, $name) {
+        return TicketReopenCount::annotate($query, $name);
+    }
 }
 
-class ThreadAttachmentCountField extends NumericField {
+class ThreadAttachmentCountField extends NumericField
+implements AnnotatedField {
 
     function addToQuery($query, $name=false) {
         return ThreadAttachmentCount::addToQuery($query, $name);
@@ -1766,9 +1808,14 @@ class ThreadAttachmentCountField extends NumericField {
     function from_query($row, $name=false) {
          return ThreadAttachmentCount::from_query($row, $name);
     }
+
+    function annotate($query, $name) {
+        return ThreadAttachmentCount::annotate($query, $name);
+    }
 }
 
-class ThreadCollaboratorCountField extends NumericField {
+class ThreadCollaboratorCountField extends NumericField
+implements  AnnotatedField {
 
     function addToQuery($query, $name=false) {
         return ThreadCollaboratorCount::addToQuery($query, $name);
@@ -1777,9 +1824,14 @@ class ThreadCollaboratorCountField extends NumericField {
     function from_query($row, $name=false) {
          return ThreadCollaboratorCount::from_query($row, $name);
     }
+
+    function annotate($query, $name) {
+        return ThreadCollaboratorCount::annotate($query, $name);
+    }
 }
 
-class TicketTasksCountField extends NumericField {
+class TicketTasksCountField extends NumericField
+implements  AnnotatedField {
 
     function addToQuery($query, $name=false) {
         return TicketTasksCount::addToQuery($query, $name);
@@ -1787,6 +1839,10 @@ class TicketTasksCountField extends NumericField {
 
     function from_query($row, $name=false) {
          return TicketTasksCount::from_query($row, $name);
+    }
+
+    function annotate($query, $name) {
+        return TicketTasksCount::annotate($query, $name);
     }
 }
 

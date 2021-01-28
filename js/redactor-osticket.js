@@ -285,22 +285,21 @@
                 .on('change', this.updateSignature.bind(this));
             // Expand on hover
             var outer = this.$signatureBox,
-                inner = $('.inner', this.$signatureBox).get(0),
+                inner = $('.inner', this.$signatureBox.get(0)).get(0),
                 originalHeight = outer.height(),
                 hoverTimeout = undefined,
                 originalShadow = this.$signatureBox.css('box-shadow');
-            this.$signatureBox.on('hover', function() {
+            this.$signatureBox.on('mouseenter', function() {
                 hoverTimeout = setTimeout(function() {
-                    originalHeight = Math.max(originalHeight, outer.height());
                     $(this).animate({
-                        'height': inner.offsetHeight
+                        'height': inner.offsetHeight + 25
                     }, 'fast');
                     $(this).css('box-shadow', 'none', 'important');
                 }.bind(this), 250);
-            }, function() {
+            }).on('mouseleave', function() {
                 clearTimeout(hoverTimeout);
                 $(this).stop().animate({
-                    'height': Math.min(inner.offsetHeight, originalHeight)
+                    'height': Math.min(inner.offsetHeight, originalHeight - 10)
                 }, 'fast');
                 $(this).css('box-shadow', originalShadow);
             });
@@ -457,6 +456,8 @@ $(function() {
                 options['plugins'].push('textdirection');
             if (el.find('rtl').length)
                 options['direction'] = 'rtl';
+            if (c.editor_spacing == 'single')
+                options.breakline = true;
             el.data('redactor', el.redactor(options));
         });
     },

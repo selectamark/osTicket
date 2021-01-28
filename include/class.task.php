@@ -361,13 +361,44 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
                     ))
                     ->values_flat('thread__entries__staff_id')
                     ->order_by('-thread__entries__id')
-                    ->limit(1)
+                    ->limit('1,1')
                 ))
                 ->first()
                 ?: false;
         }
 
         return $this->lastrespondent;
+    }
+
+    function getField($fid) {
+        if (is_numeric($fid))
+            return $this->getDymanicFieldById($fid);
+
+        // Special fields
+        switch ($fid) {
+        case 'duedate':
+            return DateTimeField::init(array(
+                'id' => $fid,
+                'name' => $fid,
+                'default' => Misc::db2gmtime($this->getDueDate()),
+                'label' => __('Due Date'),
+                'configuration' => array(
+                    'min' => Misc::gmtime(),
+                    'time' => true,
+                    'gmt' => false,
+                    'future' => true,
+                    )
+                ));
+        }
+    }
+
+    function getDymanicFieldById($fid) {
+        foreach (DynamicFormEntry::forObject($this->getId(),
+            ObjectModel::OBJECT_TYPE_TASK) as $form) {
+                foreach ($form->getFields() as $field)
+                    if ($field->getId() == $fid)
+                        return $field;
+        }
     }
 
     function getDynamicFields($criteria=array()) {
@@ -818,7 +849,7 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
             if ($cfg->alertStaffONTaskAssignment())
                 $recipients[] = $assignee;
         } elseif (($assignee instanceof Team) && $assignee->alertsEnabled()) {
-            if ($cfg->alertTeamMembersONTaskAssignment() && ($members=$assignee->getMembers()))
+            if ($cfg->alertTeamMembersONTaskAssignment() && ($members=$assignee->getMembersForAlerts()))
                 $recipients = array_merge($recipients, $members);
             elseif ($cfg->alertTeamLeadONTaskAssignment() && ($lead=$assignee->getTeamLead()))
                 $recipients[] = $lead;
@@ -905,7 +936,7 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
                     $recipients[] = $this->getStaff();
                 elseif ($this->getTeamId()
                     && ($team=$this->getTeam())
-                    && ($members=$team->getMembers())
+                    && ($members=$team->getMembersForAlerts())
                 ) {
                     $recipients = array_merge($recipients, $members);
                 }
@@ -1008,9 +1039,6 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
         }
         */
 
-        $this->lastrespondent = $response->staff;
-        $this->save();
-
         // Send activity alert to agents
         $activity = $vars['activity'] ?: $response->getActivity();
         $this->onActivity( array(
@@ -1018,6 +1046,10 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
                     'threadentry' => $response,
                     'assignee' => $assignee,
                     ));
+
+        $this->lastrespondent = $response->staff;
+        $this->save();
+
         // Send alert to collaborators
         if ($alert && $vars['emailcollab']) {
             $signature = '';
@@ -1093,7 +1125,11 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
                 return new FormattedDate($this->getCloseDate());
             break;
         case 'last_update':
-            return new FormattedDate($this->last_update);
+            return new FormattedDate($this->updated);
+        case 'description':
+            return Format::display($this->getThread()->getVar('original') ?: '');
+        case 'subject':
+            return Format::htmlchars($this->getTitle());
         default:
             if (isset($this->_answers[$tag]))
                 // The answer object is retrieved here which will
@@ -1116,6 +1152,7 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
             'dept' => array(
                 'class' => 'Dept', 'desc' => __('Department'),
             ),
+            'description' => __('Description'),
             'due_date' => array(
                 'class' => 'FormattedDate', 'desc' => __('Due Date'),
             ),
@@ -1173,7 +1210,7 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
                 $recipients[] = $assignee;
 
             if ($team = $this->getTeam())
-                $recipients = array_merge($recipients, $team->getMembers());
+                $recipients = array_merge($recipients, $team->getMembersForAlerts());
         }
 
         // Dept manager
@@ -1333,6 +1370,84 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
         return $this->save();
     }
 
+    function updateField($form, &$errors) {
+        global $thisstaff, $cfg;
+
+        if (!($field = $form->getField('field')))
+            return null;
+
+        if (!($changes = $field->getChanges()))
+            $errors['field'] = sprintf(__('%s is already assigned this value'),
+                    __($field->getLabel()));
+        else {
+            if ($field->answer) {
+                if (!$field->isEditableToStaff())
+                    $errors['field'] = sprintf(__('%s can not be edited'),
+                            __($field->getLabel()));
+                elseif (!$field->save(true))
+                    $errors['field'] =  __('Unable to update field');
+                $changes['fields'] = array($field->getId() => $changes);
+            } else {
+                $val =  $field->getClean();
+                $fid = $field->get('name');
+
+                // Convert duedate to DB timezone.
+                if ($fid == 'duedate') {
+                    if (empty($val))
+                        $val = null;
+                    elseif ($dt = Format::parseDateTime($val)) {
+                      // Make sure the due date is valid
+                      if (Misc::user2gmtime($val) <= Misc::user2gmtime())
+                          $errors['field']=__('Due date must be in the future');
+                      else {
+                          $dt->setTimezone(new DateTimeZone($cfg->getDbTimezone()));
+                          $val = $dt->format('Y-m-d H:i:s');
+                      }
+                   }
+                } elseif (is_object($val))
+                    $val = $val->getId();
+
+                $changes = array();
+                $this->{$fid} = $val;
+                foreach ($this->dirty as $F=>$old) {
+                    switch ($F) {
+                    case 'sla_id':
+                    case 'topic_id':
+                    case 'user_id':
+                    case 'source':
+                        $changes[$F] = array($old, $this->{$F});
+                    }
+                }
+
+                if (!$errors && !$this->save())
+                    $errors['field'] =  __('Unable to update field');
+            }
+        }
+
+        if ($errors)
+            return false;
+
+        // Record the changes
+        $this->logEvent('edited', $changes);
+
+        // Log comments (if any)
+        if (($comments = $form->getField('comments')->getClean())) {
+            $title = sprintf(__('%s updated'), __($field->getLabel()));
+            $_errors = array();
+            $this->postNote(
+                    array('note' => $comments, 'title' => $title),
+                    $_errors, $thisstaff, false);
+        }
+
+        $this->updated = SqlFunction::NOW();
+
+        $this->save();
+
+        Signal::send('model.updated', $this);
+
+        return true;
+    }
+
     /* static routines */
     static function lookupIdByNumber($number) {
 
@@ -1375,7 +1490,12 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
 
         // Create a thread + message.
         $thread = TaskThread::create($task);
-        $thread->addDescription($vars);
+        $desc = $thread->addDescription($vars);
+        // Set the ORIGINAL_MESSAGE Flag if Description is added
+        if ($desc) {
+            $desc->setFlag(ThreadEntry::FLAG_ORIGINAL_MESSAGE);
+            $desc->save();
+        }
 
         $task->logEvent('created', null, $thisstaff);
 
@@ -1396,9 +1516,74 @@ class Task extends TaskModel implements RestrictedAccess, Threadable {
             $task->assign($form, $_errors);
         }
 
+        $task->onNewTask();
+
         Signal::send('task.created', $task);
 
         return $task;
+    }
+
+    function onNewTask($vars=array()) {
+        global $cfg, $thisstaff;
+
+        if (!$cfg->alertONNewTask() // Check if alert is enabled
+            || !($dept=$this->getDept())
+            || ($dept->isGroupMembershipEnabled() == Dept::ALERTS_DISABLED)
+            || !($email=$cfg->getAlertEmail())
+            || !($tpl = $dept->getTemplate())
+            || !($msg=$tpl->getNewTaskAlertMsgTemplate())
+        ) {
+            return;
+        }
+
+        // Check if Dept recipients is Admin Only
+        $adminOnly = ($dept->isGroupMembershipEnabled() == Dept::ALERTS_ADMIN_ONLY);
+
+        // Alert recipients
+        $recipients = array();
+
+        // Department Manager
+        if ($cfg->alertDeptManagerONNewTask()
+            && $dept->getManagerId()
+            && !$adminOnly)
+            $recipients[] = $dept->getManager();
+
+        // Department Members
+        if ($cfg->alertDeptMembersONNewTask() && !$adminOnly)
+            foreach ($dept->getMembersForAlerts() as $M)
+                $recipients[] = $M;
+
+        $options = array();
+        $staffId = $thisstaff ? $thisstaff->getId() : 0;
+
+        $msg = $this->replaceVars($msg->asArray(), $vars);
+
+        $sentlist=array();
+        foreach ($recipients as $k=>$staff) {
+            if (!is_object($staff)
+                // Don't bother vacationing staff.
+                || !$staff->isAvailable()
+                // No need to alert the poster!
+                || $staffId == $staff->getId()
+                // No duplicates.
+                || isset($sentlist[$staff->getEmail()])
+                // Make sure staff has access to task
+                || !$this->checkStaffPerm($staff)
+            ) {
+                continue;
+            }
+            $alert = $this->replaceVars($msg, array('recipient' => $staff));
+            $email->sendAlert($staff, $alert['subj'], $alert['body'], null, $options);
+            $sentlist[$staff->getEmail()] = 1;
+        }
+
+        // Alert Admin ONLY if not already a staff
+        if ($cfg->alertAdminONNewTask()
+                && !in_array($cfg->getAdminEmail(), $sentlist)) {
+            $alert = $this->replaceVars($msg, array('recipient' => __('Admin')));
+            $email->sendAlert($cfg->getAdminEmail(), $alert['subj'],
+                    $alert['body'], null, $options);
+        }
     }
 
     function delete($comments='') {

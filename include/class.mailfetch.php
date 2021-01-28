@@ -54,10 +54,17 @@ class MailFetcher {
         if ($this->ht) {
             // Support Exchange shared mailbox auth
             // (eg. user@domain.com\shared@domain.com)
-            $usernames = explode('\\', $this->ht['username'], 2);
-            if (count($usernames) == 2) {
-                $this->authuser = $usernames[0];
-                $this->username = $usernames[1];
+            $usernames = explode('\\', $this->ht['username']);
+            $count = count($usernames);
+            if ($count == 3) {
+                $this->authuser = $usernames[0].'\\'.$usernames[1];
+                $this->username = $usernames[2];
+            } elseif ($count == 2) {
+                if (strpos($usernames[0], '@') !== false) {
+                    $this->authuser = $usernames[0];
+                    $this->username = $usernames[1];
+                } else
+                    $this->username = $usernames[0].'\\'.$usernames[1];
             } else {
                 $this->username = $this->ht['username'];
             }
@@ -79,8 +86,10 @@ class MailFetcher {
             if ($this->authuser)
                 $this->srvstr .= sprintf('/authuser=%s', $this->authuser);
 
-            $this->srvstr.='/novalidate-cert}';
-
+            if (strcasecmp($this->getEncryption(), 'SSL'))
+                $this->srvstr.='/notls}';
+            else
+                $this->srvstr.='/novalidate-cert}';
         }
 
         //Set timeouts
@@ -443,7 +452,12 @@ class MailFetcher {
                     || !$this->findFilename($struct->dparameters))) {
 
             $partNumber=$partNumber?$partNumber:1;
-            if(($text=imap_fetchbody($this->mbox, $mid, $partNumber))) {
+            if(!($text=imap_fetchbody($this->mbox, $mid, $partNumber))
+                    && $partNumber == 1
+                    && $struct->disposition == 'inline')
+                $text=imap_body($this->mbox, $mid);
+
+            if ($text) {
                 if($struct->encoding==3 or $struct->encoding==4) //base64 and qp decode.
                     $text=$this->decode($text, $struct->encoding);
 
@@ -724,7 +738,8 @@ class MailFetcher {
         }
 
         // Process overloaded attachments
-        if (($struct = imap_fetchstructure($this->mbox, $mid))
+        $attachments = array();
+        if (($struct = @imap_fetchstructure($this->mbox, $mid))
                 && ($attachments = $this->getAttachments($struct))) {
             foreach ($attachments as $i=>$info) {
                 switch (strtolower($info['type'])) {

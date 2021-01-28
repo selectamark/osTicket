@@ -411,13 +411,30 @@ class Format {
 
     //Format text for display..
     function display($text, $inline_images=true, $balance=true) {
+        global $cfg;
+
+        // Exclude external images?
+        $exclude = !$cfg->allowExternalImages();
+        // Allowed image extensions
+        $allowed = array('gif', 'png', 'jpg', 'jpeg');
+
         // Make showing offsite images optional
         $text = preg_replace_callback('/<img ([^>]*)(src="http[^"]+")([^>]*)\/>/',
-            function($match) {
-                // Drop embedded classes -- they don't refer to ours
-                $match = preg_replace('/class="[^"]*"/', '', $match);
-                return sprintf('<span %s class="non-local-image" data-%s %s></span>',
-                    $match[1], $match[2], $match[3]);
+            function($match) use ($exclude, $allowed) {
+                $m = array();
+                // Split the src URL and get the extension
+                preg_match('/src="([^"]+)"/', $match[2], $m);
+                $part = parse_url($m[1], PHP_URL_PATH);
+                $path = explode('.', $part);
+                $ext = preg_split('/[^A-Za-z]/', end($path))[0];
+
+                if (!$exclude && in_array($ext, $allowed)) {
+                    // Drop embedded classes -- they don't refer to ours
+                    $match = preg_replace('/class="[^"]*"/', '', $match);
+                    return sprintf('<span %s class="non-local-image" data-%s %s></span>',
+                        $match[1], $match[2], $match[3]);
+                } else
+                    return '';
             },
             $text);
 
@@ -431,6 +448,34 @@ class Format {
             return self::viewableImages($text);
 
         return $text;
+    }
+
+    function stripExternalImages($input, $display=false) {
+        global $cfg;
+
+        // Allowed Inline External Image Extensions
+        $allowed = array('gif', 'png', 'jpg', 'jpeg');
+        $exclude = !$cfg->allowExternalImages();
+        $local = false;
+
+        $input = preg_replace_callback('/<img ([^>]*)(src="([^"]+)")([^>]*)\/?>/',
+            function($match) use ($local, $allowed, $exclude, $display) {
+                if (strpos($match[3], 'cid:') !== false)
+                    $local = true;
+
+                // Split the src URL and get the extension
+                $part = parse_url($match[3], PHP_URL_PATH);
+                $path = explode('.', $part);
+                $ext = preg_split('/[^A-Za-z]/', end($path))[0];
+
+                if (!$local && (($exclude && $display) || !in_array($ext, $allowed)))
+                    return '';
+                else
+                    return $match[0];
+            },
+            $input);
+
+        return $input;
     }
 
     function striptags($var, $decode=true) {
@@ -464,8 +509,14 @@ class Format {
                 '/[\x{23F0}-\x{23FF}]/u',   # Clock/Buttons
                 '/[\x{23E0}-\x{23EF}]/u',   # More Buttons
                 '/[\x{2310}-\x{231F}]/u',   # Hourglass/Watch
+                '/[\x{1000B6}]/u',          # Private Use Area (Plane 16)
                 '/[\x{2322}-\x{232F}]/u'    # Keyboard
             ), '', $text);
+    }
+
+    // Insert </br> tag inside empty <p> tags to ensure proper editor spacing
+    function editor_spacing($text) {
+        return preg_replace('/<p><\/p>/', '<p><br></p>', $text);
     }
 
     //make urls clickable. Mainly for display

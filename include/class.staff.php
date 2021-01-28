@@ -94,6 +94,7 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
                         'default_ticket_queue_id' => 0,
                         'reply_redirect' => 'Ticket',
                         'img_att_view' => 'download',
+                        'editor_spacing' => 'double',
                         ));
             $this->_config = $_config->getInfo();
         }
@@ -358,6 +359,10 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
         return $this->img_att_view;
     }
 
+    function editorSpacing() {
+        return $this->editor_spacing;
+    }
+
     function forcePasswdChange() {
         return $this->change_passwd;
     }
@@ -446,6 +451,8 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
         ) {
             $this->dept_access->remove($da);
         }
+
+        $this->save();
     }
 
     function usePrimaryRoleOnAssignment() {
@@ -776,6 +783,7 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
                     'default_ticket_queue_id' => $vars['default_ticket_queue_id'],
                     'reply_redirect' => ($vars['reply_redirect'] == 'Queue') ? 'Queue' : 'Ticket',
                     'img_att_view' => ($vars['img_att_view'] == 'inline') ? 'inline' : 'download',
+                    'editor_spacing' => ($vars['editor_spacing'] == 'double') ? 'double' : 'single'
                     )
                 );
         $this->_config = $_config->getInfo();
@@ -1118,30 +1126,6 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
             }
         }
 
-        // Update some things for ::updateAccess to inspect
-        $this->setDepartmentId($vars['dept_id']);
-
-        // Format access update as [array(dept_id, role_id, alerts?)]
-        $access = array();
-        if (isset($vars['dept_access'])) {
-            foreach (@$vars['dept_access'] as $dept_id) {
-                $access[] = array($dept_id, $vars['dept_access_role'][$dept_id],
-                    @$vars['dept_access_alerts'][$dept_id]);
-            }
-        }
-        $this->updateAccess($access, $errors);
-        $this->setExtraAttr('def_assn_role',
-            isset($vars['assign_use_pri_role']), false);
-
-        // Format team membership as [array(team_id, alerts?)]
-        $teams = array();
-        if (isset($vars['teams'])) {
-            foreach (@$vars['teams'] as $team_id) {
-                $teams[] = array($team_id, @$vars['team_alerts'][$team_id]);
-            }
-        }
-        $this->updateTeams($teams, $errors);
-
         // Update the local permissions
         $this->updatePerms($vars['perms'], $errors);
 
@@ -1178,6 +1162,30 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
             return false;
 
         if ($this->save()) {
+            // Update some things for ::updateAccess to inspect
+            $this->setDepartmentId($vars['dept_id']);
+
+            // Format access update as [array(dept_id, role_id, alerts?)]
+            $access = array();
+            if (isset($vars['dept_access'])) {
+                foreach (@$vars['dept_access'] as $dept_id) {
+                    $access[] = array($dept_id, $vars['dept_access_role'][$dept_id],
+                        @$vars['dept_access_alerts'][$dept_id]);
+                }
+            }
+            $this->updateAccess($access, $errors);
+            $this->setExtraAttr('def_assn_role',
+                isset($vars['assign_use_pri_role']), false);
+
+            // Format team membership as [array(team_id, alerts?)]
+            $teams = array();
+            if (isset($vars['teams'])) {
+                foreach (@$vars['teams'] as $team_id) {
+                    $teams[] = array($team_id, @$vars['team_alerts'][$team_id]);
+                }
+            }
+            $this->updateTeams($teams, $errors);
+
             if ($vars['welcome_email'])
                 $this->sendResetEmail('registration-staff', false);
             return true;
@@ -1548,6 +1556,7 @@ extends AbstractForm {
                     'validator' => 'email',
                     'placeholder' => __('Email Address — e.g. me@mycompany.com'),
                     'length' => 128,
+                    'autocomplete' => 'email',
                   ),
             )),
             'dept_id' => new ChoiceField(array(
@@ -1583,6 +1592,7 @@ extends AbstractForm {
                 'required' => true,
                 'configuration' => array(
                     'placeholder' => __("Temporary Password"),
+                    'autocomplete' => 'new-password',
                 ),
                 'visibility' => new VisibilityConstraint(
                     new Q(array('welcome_email' => false))
@@ -1593,6 +1603,7 @@ extends AbstractForm {
                 'required' => true,
                 'configuration' => array(
                     'placeholder' => __("Confirm Password"),
+                    'autocomplete' => 'new-password',
                 ),
                 'visibility' => new VisibilityConstraint(
                     new Q(array('welcome_email' => false))

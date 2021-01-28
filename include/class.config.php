@@ -210,6 +210,7 @@ class OsticketConfig extends Config {
         'auto_claim_tickets'=>  true,
         'auto_refer_closed' => true,
         'collaborator_ticket_visibility' =>  true,
+        'disable_agent_collabs' => false,
         'require_topic_to_close' =>  false,
         'system_language' =>    'en_US',
         'default_storage_bk' => 'D',
@@ -228,6 +229,8 @@ class OsticketConfig extends Config {
         'ticket_lock' => 2, // Lock on activity
         'max_open_tickets' => 0,
         'files_req_auth' => 1,
+        'force_https' => '',
+        'allow_external_images' => 1,
     );
 
     function __construct($section=null) {
@@ -655,6 +658,10 @@ class OsticketConfig extends Config {
         return $this->get('help_topic_sort_mode');
     }
 
+    function forceHttps() {
+        return $this->get('force_https') == 'on';
+    }
+
     function setTopicSortMode($mode) {
         $modes = static::allTopicSortModes();
         if (!isset($modes[$mode]))
@@ -783,6 +790,13 @@ class OsticketConfig extends Config {
 
     function getClientRegistrationMode() {
         return $this->get('client_registration');
+    }
+
+    function isClientRegistrationMode($modes) {
+        if (!is_array($modes))
+            $modes = array($modes);
+
+        return in_array($this->getClientRegistrationMode(), $modes);
     }
 
     function isClientEmailVerificationRequired() {
@@ -1014,8 +1028,16 @@ class OsticketConfig extends Config {
         return $this->get('collaborator_ticket_visibility');
     }
 
+    function disableAgentCollaborators() {
+        return $this->get('disable_agent_collabs');
+    }
+
     function requireTopicToClose() {
         return $this->get('require_topic_to_close');
+    }
+
+    function allowExternalImages() {
+        return ($this->get('allow_external_images'));
     }
 
     function getDefaultTicketQueueId() {
@@ -1258,6 +1280,7 @@ class OsticketConfig extends Config {
             'helpdesk_title'=>$vars['helpdesk_title'],
             'helpdesk_url'=>$vars['helpdesk_url'],
             'default_dept_id'=>$vars['default_dept_id'],
+            'force_https'=>$vars['force_https'] ? 'on' : '',
             'max_page_size'=>$vars['max_page_size'],
             'log_level'=>$vars['log_level'],
             'log_graceperiod'=>$vars['log_graceperiod'],
@@ -1308,6 +1331,7 @@ class OsticketConfig extends Config {
             'agent_name_format'=>$vars['agent_name_format'],
             'hide_staff_name'=>isset($vars['hide_staff_name']) ? 1 : 0,
             'agent_avatar'=>$vars['agent_avatar'],
+            'disable_agent_collabs'=>isset($vars['disable_agent_collabs'])?1:0,
         ));
     }
 
@@ -1398,6 +1422,7 @@ class OsticketConfig extends Config {
             'allow_client_updates'=>isset($vars['allow_client_updates'])?1:0,
             'ticket_lock' => $vars['ticket_lock'],
             'default_ticket_queue'=>$vars['default_ticket_queue'],
+            'allow_external_images'=>isset($vars['allow_external_images'])?1:0,
         ));
     }
 
@@ -1628,11 +1653,6 @@ class OsticketConfig extends Config {
 
 
     function updateKBSettings($vars, &$errors) {
-
-        if ($vars['restrict_kb'] && !$this->isClientRegistrationEnabled())
-            $errors['restrict_kb'] =
-                __('The knowledge base cannot be restricted unless client registration is enabled');
-
         if ($errors) return false;
 
         return $this->updateAll(array(

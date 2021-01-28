@@ -19,7 +19,7 @@ $user     = $ticket->getOwner(); //Ticket User (EndUser)
 $team     = $ticket->getTeam();  //Assigned team.
 $sla      = $ticket->getSLA();
 $lock     = $ticket->getLock();  //Ticket lock obj
-$children = Ticket::getChildTickets($ticket->getId());
+$children = $ticket->getChildren();
 $thread = $ticket->getThread();
 if (!$lock && $cfg->getTicketLockMode() == Lock::MODE_ON_VIEW)
     $lock = $ticket->acquireLock($thisstaff->getId());
@@ -81,7 +81,7 @@ if($ticket->isOverdue())
             }
 
             if ($role->hasPerm(Ticket::PERM_EDIT)) { ?>
-                <span class="action-button pull-right"><a data-placement="bottom" data-toggle="tooltip" title="<?php echo __('Edit'); ?>" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=edit"><i class="icon-edit"></i></a></span>
+                <a class="action-button pull-right" data-placement="bottom" data-toggle="tooltip" title="<?php echo __('Edit'); ?>" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=edit"><i class="icon-edit"></i></a>
             <?php
             } ?>
             <span class="action-button pull-right" data-placement="bottom" data-dropdown="#action-dropdown-print" data-toggle="tooltip" title="<?php echo __('Print'); ?>">
@@ -90,28 +90,26 @@ if($ticket->isOverdue())
             </span>
             <div id="action-dropdown-print" class="action-dropdown anchor-right">
               <ul>
-                 <li><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=print&notes=0&events=0"><i
-                 class="icon-file-alt"></i> <?php echo __('Ticket Thread'); ?></a>
-                 <li><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=print&notes=1&events=0"><i
+                 <li title="PDF File"><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=print&notes=0&events=0"><i
+                 class="icon-file-text-alt"></i> <?php echo __('Ticket Thread'); ?></a>
+                 <li title="PDF File"><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=print&notes=1&events=0"><i
                  class="icon-file-text-alt"></i> <?php echo __('Thread + Internal Notes'); ?></a>
-                 <li><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=print&notes=1&events=1"><i
-                 class="icon-list-alt"></i> <?php echo __('Thread + Internal Notes + Events'); ?></a>
+                 <li title="PDF File"><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=print&notes=1&events=1"><i
+                 class="icon-file-text-alt"></i> <?php echo __('Thread + Internal Notes + Events'); ?></a>
                  <?php if (extension_loaded('zip')) { ?>
-                 <li><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=zip&notes=1"><i
-                 class="icon-download-alt"></i> <?php echo __('Export with Notes + Attachments'); ?></a>
-                 <li><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=zip&notes=1&tasks=1"><i
-                 class="icon-download"></i> <?php echo __('Export with Notes + Attachments + Tasks'); ?></a>
+                 <li title="ZIP Archive"><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=zip&notes=1"><i
+                 class="icon-folder-close-alt"></i> <?php echo __('Thread + Internal Notes + Attachments'); ?></a>
+                 <li title="ZIP Archive"><a class="no-pjax" target="_blank" href="tickets.php?id=<?php echo $ticket->getId(); ?>&a=zip&notes=1&tasks=1"><i
+                 class="icon-folder-close-alt"></i> <?php echo __('Thread + Internal Notes + Attachments + Tasks'); ?></a>
                  <?php } ?>
               </ul>
             </div>
             <?php
             // Transfer
             if ($role->hasPerm(Ticket::PERM_TRANSFER)) {?>
-            <span class="action-button pull-right">
-            <a class="ticket-action" id="ticket-transfer" data-placement="bottom" data-toggle="tooltip" title="<?php echo __('Transfer'); ?>"
+            <a class="action-button pull-right ticket-action" id="ticket-transfer" data-placement="bottom" data-toggle="tooltip" title="<?php echo __('Transfer'); ?>"
                 data-redirect="tickets.php"
                 href="#tickets/<?php echo $ticket->getId(); ?>/transfer"><i class="icon-share"></i></a>
-            </span>
             <?php
             } ?>
 
@@ -643,6 +641,7 @@ if($ticket->isOverdue())
 <br>
 <?php
 foreach (DynamicFormEntry::forTicket($ticket->getId()) as $form) {
+    $form->addMissingFields();
     //Find fields to exclude if disabled by help topic
     $disabled = Ticket::getMissingRequiredFields($ticket, true);
 
@@ -673,26 +672,33 @@ foreach (DynamicFormEntry::forTicket($ticket->getId()) as $form) {
     foreach ($displayed as $a) {
         $id =  $a->getLocal('id');
         $label = $a->getLocal('label');
-        $v = $a->display();
-        $class = $v ? '' : 'class="faded"';
-        $clean = $v ?: '&mdash;' . __('Empty') .  '&mdash;';
         $field = $a->getField();
+        $config = $field->getConfiguration();
+        $html = isset($config['html']) ? $config['html'] : false;
+        $v = $html ? Format::striptags($a->display()) : $a->display();
+        $class = (Format::striptags($v)) ? '' : 'class="faded"';
+        $clean = (Format::striptags($v))
+                ? ($html ? Format::striptags($v) : $v)
+                : '&mdash;' . __('Empty') .  '&mdash;';
         $isFile = ($field instanceof FileUploadField);
+        $url = "#tickets/".$ticket->getId()."/field/".$id;
 ?>
         <tr>
             <td width="200"><?php echo Format::htmlchars($label); ?>:</td>
             <td id="<?php echo sprintf('inline-answer-%s', $field->getId()); ?>">
             <?php if ($role->hasPerm(Ticket::PERM_EDIT)
                     && $field->isEditableToStaff()) {
-                    $isEmpty = strpos($v, 'Empty');
+                    $isEmpty = strpos($v, 'Empty') || ($v == '');
                     if ($isFile && !$isEmpty) {
                         echo sprintf('<span id="field_%s" %s >%s</span><br>', $id,
                             $class,
-                            $v ?: '<span class="faded">&mdash;' . __('Empty') .  '&mdash; </span>');
+                            $clean);
                     }
+                    $title = ($html && !$isEmpty) ? __('View Content') : __('Update');
+                    $href = $url.(($html && !$isEmpty) ? '/view' : '/edit');
                          ?>
-                  <a class="inline-edit" data-placement="bottom" data-toggle="tooltip" title="<?php echo __('Update'); ?>"
-                      href="#tickets/<?php echo $ticket->getId(); ?>/field/<?php echo $id; ?>/edit">
+                  <a class="inline-edit" data-placement="bottom" data-toggle="tooltip" title="<?php echo $title; ?>"
+                      href="<?php echo $href; ?>">
                   <?php
                     if ($isFile && !$isEmpty) {
                       echo "<i class=\"icon-edit\"></i>";
@@ -701,11 +707,19 @@ foreach (DynamicFormEntry::forTicket($ticket->getId()) as $form) {
                       echo sprintf('<span id="field_%s" %s >%s</span>', $id, $class, $clean);
                       echo "<br><i class=\"icon-edit\"></i>";
                     } else
-                        echo sprintf('<span id="field_%s" %s >%s</span>', $id, $class, $clean); ?>
+                        echo sprintf('<span id="field_%s" %s >%s</span>', $id, $class, $clean);
+
+                    $a = $field->getAnswer();
+                    $hint = ($field->isRequiredForClose() && $a && !$a->getValue() && get_class($field) != 'BooleanField') ?
+                        sprintf('<i class="icon-warning-sign help-tip warning field-label" data-title="%s" data-content="%s"
+                        /></i>', __('Required to close ticket'),
+                        __('Data is required in this field in order to close the related ticket')) : '';
+                    echo $hint;
+                  ?>
               </a>
             <?php
             } else {
-                echo $v;
+                echo $clean;
             } ?>
             </td>
         </tr>
@@ -1034,7 +1048,7 @@ if ($errors['err'] && isset($_POST['a'])) {
                         class="<?php if ($cfg->isRichTextEnabled()) echo 'richtext';
                             ?> draft draft-delete fullscreen" <?php
     list($draft, $attrs) = Draft::getDraftAndDataAttrs('ticket.response', $ticket->getId(), $info['response']);
-    echo $attrs; ?>><?php echo $_POST ? $info['response'] : $draft;
+    echo $attrs; ?>><?php echo ThreadEntryBody::clean($_POST ? $info['response'] : $draft);
                     ?></textarea>
                 <div id="reply_form_attachments" class="attachments">
                 <?php
@@ -1154,7 +1168,7 @@ if ($errors['err'] && isset($_POST['a'])) {
                         class="<?php if ($cfg->isRichTextEnabled()) echo 'richtext';
                             ?> draft draft-delete fullscreen" <?php
     list($draft, $attrs) = Draft::getDraftAndDataAttrs('ticket.note', $ticket->getId(), $info['note']);
-    echo $attrs; ?>><?php echo $_POST ? $info['note'] : $draft;
+    echo $attrs; ?>><?php echo ThreadEntryBody::clean($_POST ? $info['note'] : $draft);
                         ?></textarea>
                 <div class="attachments">
                 <?php
@@ -1279,7 +1293,7 @@ if ($errors['err'] && isset($_POST['a'])) {
     </p>
     <p class="confirm-action" style="display:none;" id="changeuser-confirm">
         <span id="msg_warning" style="display:block;vertical-align:top">
-        <?php echo sprintf(Format::htmlchars(__('%s <%s> will longer have access to the ticket')),
+        <?php echo sprintf(Format::htmlchars(__('%s <%s> will no longer have access to the ticket')),
             '<b>'.Format::htmlchars($ticket->getName()).'</b>', Format::htmlchars($ticket->getEmail())); ?>
         </span>
         <?php echo sprintf(__('Are you sure you want to <b>change</b> ticket owner to %s?'),
